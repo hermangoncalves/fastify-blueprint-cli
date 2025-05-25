@@ -61,6 +61,38 @@ const appTemplate: Template = {
   },
 };
 
+const ormConfigs = {
+  prisma: {
+    dependencies: {
+      "@prisma/client": "^5.10.0",
+    },
+    devDependencies: {
+      prisma: "^5.10.0",
+    },
+    scripts: {
+      "prisma:generate": "prisma generate",
+      "prisma:migrate": "prisma migrate dev",
+      "prisma:studio": "prisma studio",
+    },
+  },
+  drizzle: {
+    dependencies: {
+      "drizzle-orm": "^0.30.0",
+      pg: "^8.11.3",
+    },
+    devDependencies: {
+      "drizzle-kit": "^0.20.14",
+      "@types/pg": "^8.11.2",
+    },
+    scripts: {
+      "db:generate": "drizzle-kit generate:pg",
+      "db:migrate": "tsx src/migrate.ts",
+      "db:studio": "drizzle-kit studio",
+    },
+  },
+  none: null,
+};
+
 function generateApp(dir: string, template: Template, data: TemplateData) {
   return new Promise((resolve, reject) => {
     generateFromTemplate(
@@ -151,7 +183,8 @@ export const generateCommand = new Command()
         type: "input",
         name: "author",
         message: "Author:",
-        default: "",
+        default: options.author,
+        when: !options.author,
       },
       {
         type: "input",
@@ -166,31 +199,69 @@ export const generateCommand = new Command()
         choices: pluginsChoices,
       },
       {
+        type: "list",
+        name: "orm",
+        message: "Which ORM do you want to use?",
+        choices: Object.keys(ormConfigs),
+        default: "none",
+      },
+      {
         type: "confirm",
         name: "docker",
         message: "Include Docker support?",
         default: false,
       },
     ]);
-    const { projectName, plugins, docker, author, description } = answers;
 
-    appTemplate.author = author;
-    appTemplate.description = description;
 
-    if (docker) {
+    appTemplate.author = answers.author;
+    appTemplate.description = answers.description;
+
+    if (answers.orm !== "none" && answers.orm) {
+      const ormConfig = ormConfigs[answers.orm as keyof typeof ormConfigs];
+
+      if (!ormConfig) {
+        logger.error("ORM not found");
+        return;
+      }
+
+      appTemplate.dependencies = {
+        ...appTemplate.dependencies,
+        ...ormConfig.dependencies,
+      };
+      appTemplate.devDependencies = {
+        ...appTemplate.devDependencies,
+        ...ormConfig.devDependencies,
+      };
+      appTemplate.scripts = { ...appTemplate.scripts, ...ormConfig.scripts };
+
+      const ormTemplateDir = path.join(__dirname, "templates", answers.orm);
+      const targetDir = path.join(process.cwd(), answers.projectName);
+
+      generateFromTemplate(
+        ormTemplateDir,
+        targetDir,
+        { projectName: answers.projectName },
+        (file) => {
+          logger.info(`generated file: ${file}`);
+        }
+      );
+    }
+
+    if (answers.docker) {
       appTemplate.scripts["docker:build"] = `docker-compose build`;
       appTemplate.scripts["docker:up"] = `docker-compose up -d`;
       appTemplate.scripts["docker:down"] = `docker-compose down`;
       appTemplate.scripts["docker:logs"] = `docker-compose logs -f`;
 
       const dockerTemplateDir = path.join(__dirname, "templates", "docker");
-      const targetDir = path.join(process.cwd(), projectName);
+      const targetDir = path.join(process.cwd(), answers.projectName);
 
       generateFromTemplate(
         dockerTemplateDir,
         targetDir,
         {
-          projectName,
+          projectName: answers.projectName,
         },
         (file) => {
           logger.info(`generated file: ${file}`);
@@ -198,7 +269,7 @@ export const generateCommand = new Command()
       );
     }
 
-    const pluginsDependencies = plugins.reduce(
+    const pluginsDependencies = answers.plugins.reduce(
       (acc: Record<string, string>, plugin: string) => {
         const { pkg, version } = pluginsTemplate[plugin];
         acc[pkg] = version;
@@ -212,5 +283,5 @@ export const generateCommand = new Command()
       ...pluginsDependencies,
     };
 
-    generateApp(projectName, appTemplate, {});
+    generateApp(answers.projectName, appTemplate, {});
   });

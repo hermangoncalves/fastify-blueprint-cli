@@ -1,44 +1,36 @@
 import { Command } from "commander";
 import inquirer from "inquirer";
 import ora, { Ora } from "ora";
+import fs from "fs-extra";
+import path from "path";
+import { execSync } from "child_process";
 
 import { sleep } from "./utils";
 import { GenerateOptions, Template } from "./types";
 import { generateFromTemplate, TemplateData } from "generate-from-template";
-import path from "path";
 import { logger } from "./logger";
-import { execSync } from "child_process";
-import { readFile, writeFile } from "fs";
 
 type PackageDependency = {
   pkg: string;
   version: string;
 };
 
-export const pluginsTemplate: Record<string, PackageDependency> = {
-  cors: {
-    pkg: "@fastify/cors",
-    version: "^11.0.1",
-  },
-  jwt: {
-    pkg: "@fastify/jwt",
-    version: "^9.1.0",
-  },
-  "rate-limit": {
-    pkg: "@fastify/rate-limit",
-    version: "^10.2.2",
-  },
-  swagger: {
-    pkg: "@fastify/swagger",
-    version: "^9.4.2",
-  },
-  "swagger-ui": {
-    pkg: "@fastify/swagger-ui",
-    version: "^5.2.2",
-  },
+type ORMConfig = {
+  dir: string;
+  dependencies: Record<string, string>;
+  devDependencies: Record<string, string>;
+  scripts: Record<string, string>;
 };
 
-const appTemplate: Template = {
+export const pluginsDependenciesTemplates: Record<string, PackageDependency> = {
+  cors: { pkg: "@fastify/cors", version: "^11.0.1" },
+  jwt: { pkg: "@fastify/jwt", version: "^9.1.0" },
+  "rate-limit": { pkg: "@fastify/rate-limit", version: "^10.2.2" },
+  swagger: { pkg: "@fastify/swagger", version: "^9.4.2" },
+  "swagger-ui": { pkg: "@fastify/swagger-ui", version: "^5.2.2" },
+};
+
+const appBaseTemplate: Template = {
   dir: "app-ts",
   main: "server.ts",
   author: "",
@@ -61,14 +53,11 @@ const appTemplate: Template = {
   },
 };
 
-const ormConfigs = {
+const ormConfigs: Record<string, ORMConfig | null> = {
   prisma: {
-    dependencies: {
-      "@prisma/client": "^5.10.0",
-    },
-    devDependencies: {
-      prisma: "^5.10.0",
-    },
+    dir: "prisma",
+    dependencies: { "@prisma/client": "^5.10.0" },
+    devDependencies: { prisma: "^5.10.0" },
     scripts: {
       "prisma:generate": "prisma generate",
       "prisma:migrate": "prisma migrate dev",
@@ -76,14 +65,9 @@ const ormConfigs = {
     },
   },
   drizzle: {
-    dependencies: {
-      "drizzle-orm": "^0.30.0",
-      pg: "^8.11.3",
-    },
-    devDependencies: {
-      "drizzle-kit": "^0.20.14",
-      "@types/pg": "^8.11.2",
-    },
+    dir: "drizzle",
+    dependencies: { "drizzle-orm": "^0.30.0", pg: "^8.11.3" },
+    devDependencies: { "drizzle-kit": "^0.20.14", "@types/pg": "^8.11.2" },
     scripts: {
       "db:generate": "drizzle-kit generate:pg",
       "db:migrate": "tsx src/migrate.ts",
@@ -93,61 +77,101 @@ const ormConfigs = {
   none: null,
 };
 
-function generateApp(dir: string, template: Template, data: TemplateData) {
-  return new Promise((resolve, reject) => {
-    generateFromTemplate(
-      path.join(__dirname, "templates", appTemplate.dir),
-      dir,
-      data,
-      (file) => {
-        logger.info(`generated file: ${file}`);
-      },
-      (err) => {
-        if (err) return reject(err);
-
-        process.chdir(dir);
-        execSync("pnpm init");
-
-        logger.info(`reading package.json in ${dir}`);
-        readFile("package.json", (err, data) => {
-          if (err) return reject(err);
-          const packageJson = JSON.parse(data.toString());
-
-          packageJson.main = template.main;
-          packageJson.author = template.author;
-          packageJson.description = template.description;
-          packageJson.scripts = Object.assign(
-            packageJson.scripts || {},
-            template.scripts
-          );
-
-          packageJson.dependencies = Object.assign(
-            packageJson.dependencies || {},
-            template.dependencies
-          );
-
-          packageJson.devDependencies = Object.assign(
-            packageJson.devDependencies || {},
-            template.devDependencies
-          );
-
-          writeFile(
-            "package.json",
-            JSON.stringify(packageJson, null, 2),
-            (err) => {
-              if (err) return reject(err);
-              logger.info(`package.json updated`);
-              resolve(true);
-            }
-          );
-        });
-
-        execSync("pnpm install");
-
-        resolve(true);
-      }
+function executeCommand(command: string, cwd: string, spinner: Ora) {
+  try {
+    spinner.text = `Executing: ${command} in ${cwd}`;
+    const output = execSync(command, { cwd, stdio: "pipe" }).toString();
+    spinner.succeed(`Successfully executed: ${command}`);
+    logger.debug(`Command output: \n${output}`);
+  } catch (error: any) {
+    spinner.fail(`Failed to execute: ${command}`);
+    logger.error(
+      `Error executing command: ${command}\n${
+        error.stderr ? error.stderr.toString() : error.message
+      }`
     );
-  });
+    throw new Error(`Command failed: ${command}`);
+  }
+}
+
+async function updatePackageJson(
+  projectDir: string,
+  template: Template,
+  spinner: Ora
+) {
+  const packageJsonPath = path.join(projectDir, "package.json");
+  spinner.text = `Updating package.json in ${projectDir}`;
+
+  try {
+    const data = await fs.readFile(packageJsonPath, "utf8");
+    let packageJson = JSON.parse(data);
+
+    packageJson.main = template.main || packageJson.main;
+    packageJson.author = template.author || packageJson.author;
+    packageJson.description = template.description || packageJson.description;
+
+    packageJson.scripts = {
+      ...(packageJson.scripts || {}),
+      ...template.scripts,
+    };
+    packageJson.dependencies = {
+      ...(packageJson.dependencies || {}),
+      ...template.dependencies,
+    };
+    packageJson.devDependencies = {
+      ...(packageJson.devDependencies || {}),
+      ...template.devDependencies,
+    };
+
+    await fs.writeFile(
+      packageJsonPath,
+      JSON.stringify(packageJson, null, 2),
+      "utf8"
+    );
+  } catch (error: any) {
+    spinner.fail(`Failed to update package.json.`);
+    logger.error(`Error updating package.json: ${error.message}`);
+    throw new Error("Failed to update package.json.");
+  }
+}
+
+async function generateApp(
+  projectName: string,
+  template: Template,
+  data: TemplateData,
+  spinner: Ora
+) {
+  const projectDir = path.join(process.cwd(), projectName);
+  const templateSourceDir = path.join(__dirname, "templates", template.dir);
+
+  spinner.start(`Generating project files in ${projectDir}`);
+  try {
+    await new Promise<void>((resolve, reject) => {
+      generateFromTemplate(
+        templateSourceDir,
+        projectDir,
+        data,
+        (file) => {
+          logger.info(`Generated file: ${file}`);
+        },
+        (err) => {
+          if (err) return reject(err);
+          resolve();
+        }
+      );
+    });
+    spinner.succeed(`Project files generated.`);
+  } catch (error: any) {
+    spinner.fail(`Failed to generate project files.`);
+    logger.error(`Error generating template: ${error.message}`);
+    throw new Error("Failed to generate project files.");
+  }
+
+  process.chdir(projectDir);
+
+  executeCommand("pnpm init", projectDir, spinner);
+  await updatePackageJson(projectDir, template, spinner);
+  executeCommand("pnpm install", projectDir, spinner);
 }
 
 export const generateCommand = new Command()
@@ -156,14 +180,14 @@ export const generateCommand = new Command()
   .option("--name <name>", "Project name")
   .option("--orm <orm>", "ORM to use (e.g., prisma, drizzle)")
   .action(async (options: GenerateOptions) => {
-    const spinner: Ora = ora("Starting project configuration").start();
+    let spinner: Ora;
 
-    await sleep(2000);
-
+    spinner = ora("Starting project configuration").start();
+    await sleep(500);
     spinner.stop();
 
-    const pluginsChoices = Object.entries(pluginsTemplate).map(
-      ([key, { pkg, version }]) => ({
+    const pluginsChoices = Object.entries(pluginsDependenciesTemplates).map(
+      ([key, { pkg }]) => ({
         name: pkg,
         value: key,
       })
@@ -183,14 +207,14 @@ export const generateCommand = new Command()
         type: "input",
         name: "author",
         message: "Author:",
-        default: options.author,
+        default: options.author || "",
         when: !options.author,
       },
       {
         type: "input",
         name: "description",
         message: "Project description:",
-        default: "My awesome project",
+        default: "My awesome Fastify project",
       },
       {
         type: "checkbox",
@@ -213,75 +237,131 @@ export const generateCommand = new Command()
       },
     ]);
 
+    const templatesDir = path.join(__dirname, "templates");
+    const projectSrcDir = path.join(process.cwd(), answers.projectName, "src");
 
-    appTemplate.author = answers.author;
-    appTemplate.description = answers.description;
+    const finalAppTemplate = { ...appBaseTemplate };
+
+    finalAppTemplate.author = answers.author;
+    finalAppTemplate.description = answers.description;
 
     if (answers.orm !== "none" && answers.orm) {
       const ormConfig = ormConfigs[answers.orm as keyof typeof ormConfigs];
 
       if (!ormConfig) {
-        logger.error("ORM not found");
-        return;
+        logger.error(`ORM configuration for "${answers.orm}" not found.`);
+        process.exit(1);
       }
 
-      appTemplate.dependencies = {
-        ...appTemplate.dependencies,
+      finalAppTemplate.dependencies = {
+        ...finalAppTemplate.dependencies,
         ...ormConfig.dependencies,
       };
-      appTemplate.devDependencies = {
-        ...appTemplate.devDependencies,
+
+      finalAppTemplate.devDependencies = {
+        ...finalAppTemplate.devDependencies,
         ...ormConfig.devDependencies,
       };
-      appTemplate.scripts = { ...appTemplate.scripts, ...ormConfig.scripts };
 
-      const ormTemplateDir = path.join(__dirname, "templates", answers.orm);
-      const targetDir = path.join(process.cwd(), answers.projectName);
+      finalAppTemplate.scripts = {
+        ...finalAppTemplate.scripts,
+        ...ormConfig.scripts,
+      };
 
-      generateFromTemplate(
-        ormTemplateDir,
-        targetDir,
-        { projectName: answers.projectName },
-        (file) => {
-          logger.info(`generated file: ${file}`);
+      const ormTemplateDir = path.join(templatesDir, ormConfig.dir);
+
+      if (answers.orm === "drizzle") {
+        spinner = ora("Generating Drizzle DB files").start();
+        const dbDir = path.join(projectSrcDir, "db");
+        try {
+          await new Promise<void>((resolve, reject) => {
+            generateFromTemplate(
+              path.join(ormTemplateDir, "db"),
+              dbDir,
+              {},
+              (file) => {
+                logger.info(`Generated Drizzle file: ${file}`);
+              },
+              (err) => {
+                if (err) return reject(err);
+                resolve();
+              }
+            );
+          });
+          fs.copyFileSync(
+            path.join(ormTemplateDir, "drizzle.config.ts"),
+            path.join(process.cwd(), answers.projectName, "drizzle.config.ts")
+          );
+          logger.info(`Generated drizzle.config.ts`);
+          spinner.succeed("Drizzle DB files generated.");
+        } catch (error: any) {
+          spinner.fail("Failed to generate Drizzle DB files.");
+          logger.error(`Error: ${error.message}`);
+          process.exit(1);
         }
-      );
+      }
     }
 
     if (answers.docker) {
-      appTemplate.scripts["docker:build"] = `docker-compose build`;
-      appTemplate.scripts["docker:up"] = `docker-compose up -d`;
-      appTemplate.scripts["docker:down"] = `docker-compose down`;
-      appTemplate.scripts["docker:logs"] = `docker-compose logs -f`;
+      finalAppTemplate.scripts["docker:build"] = `docker-compose build`;
+      finalAppTemplate.scripts["docker:up"] = `docker-compose up -d`;
+      finalAppTemplate.scripts["docker:down"] = `docker-compose down`;
+      finalAppTemplate.scripts["docker:logs"] = `docker-compose logs -f`;
 
+      spinner = ora("Generating Docker files").start();
       const dockerTemplateDir = path.join(__dirname, "templates", "docker");
       const targetDir = path.join(process.cwd(), answers.projectName);
-
-      generateFromTemplate(
-        dockerTemplateDir,
-        targetDir,
-        {
-          projectName: answers.projectName,
-        },
-        (file) => {
-          logger.info(`generated file: ${file}`);
-        }
-      );
+      try {
+        await new Promise<void>((resolve, reject) => {
+          generateFromTemplate(
+            dockerTemplateDir,
+            targetDir,
+            {
+              projectName: answers.projectName,
+            },
+            (file) => {
+              logger.info(`Generated Docker file: ${file}`);
+            },
+            (err) => {
+              if (err) return reject(err);
+              resolve();
+            }
+          );
+        });
+        spinner.succeed("Docker files generated.");
+      } catch (error: any) {
+        spinner.fail("Failed to generate Docker files.");
+        logger.error(`Error: ${error.message}`);
+        process.exit(1);
+      }
     }
 
     const pluginsDependencies = answers.plugins.reduce(
       (acc: Record<string, string>, plugin: string) => {
-        const { pkg, version } = pluginsTemplate[plugin];
-        acc[pkg] = version;
+        const dep = pluginsDependenciesTemplates[plugin];
+        if (dep) {
+          acc[dep.pkg] = dep.version;
+        }
         return acc;
       },
       {}
     );
 
-    appTemplate.dependencies = {
-      ...appTemplate.dependencies,
+    finalAppTemplate.dependencies = {
+      ...finalAppTemplate.dependencies,
       ...pluginsDependencies,
     };
 
-    generateApp(answers.projectName, appTemplate, {});
+    spinner = ora("Generating Fastify project...").start();
+    try {
+      await generateApp(answers.projectName, finalAppTemplate, {}, spinner);
+      spinner.succeed(
+        `Project "${answers.projectName}" created and dependencies installed successfully!`
+      );
+      logger.info(`\nNext steps:\n  cd ${answers.projectName}\n  pnpm dev`);
+    } catch (error: any) {
+      spinner.fail(`Failed to create project: ${answers.projectName}`);
+      logger.error(`Error during project generation: ${error.message}`);
+      process.exit(1);
+    }
   });

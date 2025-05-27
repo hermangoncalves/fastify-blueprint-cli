@@ -31,7 +31,7 @@ export const pluginsDependenciesTemplates: Record<string, PackageDependency> = {
 };
 
 const appBaseTemplate: Template = {
-  dir: "app-ts",
+  dir: "app",
   main: "server.ts",
   author: "",
   description: "My awesome project",
@@ -40,16 +40,18 @@ const appBaseTemplate: Template = {
     build: "tsc && tsc-alias",
   },
   dependencies: {
-    fastify: "^5.2.1",
-    pino: "^9.6.0",
+    "@fastify/autoload": "^6.3.0",
+    fastify: "^5.3.3",
+    "fastify-plugin": "^5.0.1",
+    "fastify-type-provider-zod": "^4.0.2",
+    pino: "^9.7.0",
     "pino-pretty": "^13.0.0",
+    typescript: "^5.8.3",
   },
   devDependencies: {
+    "@types/node": "^22.15.21",
     prettier: "^3.5.3",
-    "tsc-alias": "^1.8.13",
-    tsx: "^4.19.3",
-    typescript: "^5.8.2",
-    "@types/node": "^22.13.13",
+    tsx: "^4.19.4",
   },
 };
 
@@ -139,6 +141,7 @@ async function generateApp(
   projectName: string,
   template: Template,
   data: TemplateData,
+  plugins: string[],
   spinner: Ora
 ) {
   const projectDir = path.join(process.cwd(), projectName);
@@ -156,6 +159,16 @@ async function generateApp(
         },
         (err) => {
           if (err) return reject(err);
+          const pluginsTemplateDir = path.join(
+            __dirname,
+            "templates",
+            "plugins"
+          );
+          for (const plugin of plugins) {
+            const pluginTemplateDir = path.join(pluginsTemplateDir, `${plugin}.ts`);
+            const pluginDir = path.join(projectDir, "src", "plugins", `${plugin}.ts`);
+            fs.copySync(pluginTemplateDir, pluginDir);
+          }
           resolve();
         }
       );
@@ -171,7 +184,6 @@ async function generateApp(
 
   executeCommand("pnpm init", projectDir, spinner);
   await updatePackageJson(projectDir, template, spinner);
-  executeCommand("pnpm install", projectDir, spinner);
 }
 
 export const generateCommand = new Command()
@@ -238,103 +250,101 @@ export const generateCommand = new Command()
     ]);
 
     const templatesDir = path.join(__dirname, "templates");
-    const projectSrcDir = path.join(process.cwd(), answers.projectName, "src");
-
     const finalAppTemplate = { ...appBaseTemplate };
 
     finalAppTemplate.author = answers.author;
     finalAppTemplate.description = answers.description;
 
-    if (answers.orm !== "none" && answers.orm) {
-      const ormConfig = ormConfigs[answers.orm as keyof typeof ormConfigs];
+    // if (answers.orm !== "none" && answers.orm) {
+    //   const ormConfig = ormConfigs[answers.orm as keyof typeof ormConfigs];
 
-      if (!ormConfig) {
-        logger.error(`ORM configuration for "${answers.orm}" not found.`);
-        process.exit(1);
-      }
+    //   if (!ormConfig) {
+    //     logger.error(`ORM configuration for "${answers.orm}" not found.`);
+    //     process.exit(1);
+    //   }
 
-      finalAppTemplate.dependencies = {
-        ...finalAppTemplate.dependencies,
-        ...ormConfig.dependencies,
-      };
+    //   finalAppTemplate.dependencies = {
+    //     ...finalAppTemplate.dependencies,
+    //     ...ormConfig.dependencies,
+    //   };
 
-      finalAppTemplate.devDependencies = {
-        ...finalAppTemplate.devDependencies,
-        ...ormConfig.devDependencies,
-      };
+    //   finalAppTemplate.devDependencies = {
+    //     ...finalAppTemplate.devDependencies,
+    //     ...ormConfig.devDependencies,
+    //   };
 
-      finalAppTemplate.scripts = {
-        ...finalAppTemplate.scripts,
-        ...ormConfig.scripts,
-      };
+    //   finalAppTemplate.scripts = {
+    //     ...finalAppTemplate.scripts,
+    //     ...ormConfig.scripts,
+    //   };
 
-      const ormTemplateDir = path.join(templatesDir, ormConfig.dir);
+    //   const ormTemplateDir = path.join(templatesDir, ormConfig.dir);
 
-      if (answers.orm === "drizzle") {
-        spinner = ora("Generating Drizzle DB files").start();
-        const dbDir = path.join(projectSrcDir, "db");
-        try {
-          await new Promise<void>((resolve, reject) => {
-            generateFromTemplate(
-              path.join(ormTemplateDir, "db"),
-              dbDir,
-              {},
-              (file) => {
-                logger.info(`Generated Drizzle file: ${file}`);
-              },
-              (err) => {
-                if (err) return reject(err);
-                resolve();
-              }
-            );
-          });
-          fs.copyFileSync(
-            path.join(ormTemplateDir, "drizzle.config.ts"),
-            path.join(process.cwd(), answers.projectName, "drizzle.config.ts")
-          );
-          logger.info(`Generated drizzle.config.ts`);
-          spinner.succeed("Drizzle DB files generated.");
-        } catch (error: any) {
-          spinner.fail("Failed to generate Drizzle DB files.");
-          logger.error(`Error: ${error.message}`);
-          process.exit(1);
-        }
-      }
-    }
+    //   if (answers.orm === "drizzle") {
+    //     spinner = ora("Generating Drizzle DB files").start();
+    //     const dbDir = path.join(projectSrcDir, "db");
+    //     try {
+    //       await new Promise<void>((resolve, reject) => {
+    //         generateFromTemplate(
+    //           path.join(ormTemplateDir, "db"),
+    //           dbDir,
+    //           {},
+    //           (file) => {
+    //             logger.info(`Generated Drizzle file: ${file}`);
+    //           },
+    //           (err) => {
+    //             if (err) return reject(err);
+    //             resolve();
+    //           }
+    //         );
+    //       });
+    //       fs.copyFileSync(
+    //         path.join(ormTemplateDir, "drizzle.config.ts"),
+    //         path.join(process.cwd(), answers.projectName, "drizzle.config.ts")
+    //       );
+    //       logger.info(`Generated drizzle.config.ts`);
+    //       spinner.succeed("Drizzle DB files generated.");
+    //     } catch (error: any) {
+    //       spinner.fail("Failed to generate Drizzle DB files.");
+    //       logger.error(`Error: ${error.message}`);
+    //       process.exit(1);
+    //     }
+    //   }
+    // }
 
-    if (answers.docker) {
-      finalAppTemplate.scripts["docker:build"] = `docker-compose build`;
-      finalAppTemplate.scripts["docker:up"] = `docker-compose up -d`;
-      finalAppTemplate.scripts["docker:down"] = `docker-compose down`;
-      finalAppTemplate.scripts["docker:logs"] = `docker-compose logs -f`;
+    // if (answers.docker) {
+    //   finalAppTemplate.scripts["docker:build"] = `docker-compose build`;
+    //   finalAppTemplate.scripts["docker:up"] = `docker-compose up -d`;
+    //   finalAppTemplate.scripts["docker:down"] = `docker-compose down`;
+    //   finalAppTemplate.scripts["docker:logs"] = `docker-compose logs -f`;
 
-      spinner = ora("Generating Docker files").start();
-      const dockerTemplateDir = path.join(__dirname, "templates", "docker");
-      const targetDir = path.join(process.cwd(), answers.projectName);
-      try {
-        await new Promise<void>((resolve, reject) => {
-          generateFromTemplate(
-            dockerTemplateDir,
-            targetDir,
-            {
-              projectName: answers.projectName,
-            },
-            (file) => {
-              logger.info(`Generated Docker file: ${file}`);
-            },
-            (err) => {
-              if (err) return reject(err);
-              resolve();
-            }
-          );
-        });
-        spinner.succeed("Docker files generated.");
-      } catch (error: any) {
-        spinner.fail("Failed to generate Docker files.");
-        logger.error(`Error: ${error.message}`);
-        process.exit(1);
-      }
-    }
+    //   spinner = ora("Generating Docker files").start();
+    //   const dockerTemplateDir = path.join(__dirname, "templates", "docker");
+    //   const targetDir = path.join(process.cwd(), answers.projectName);
+    //   try {
+    //     await new Promise<void>((resolve, reject) => {
+    //       generateFromTemplate(
+    //         dockerTemplateDir,
+    //         targetDir,
+    //         {
+    //           projectName: answers.projectName,
+    //         },
+    //         (file) => {
+    //           logger.info(`Generated Docker file: ${file}`);
+    //         },
+    //         (err) => {
+    //           if (err) return reject(err);
+    //           resolve();
+    //         }
+    //       );
+    //     });
+    //     spinner.succeed("Docker files generated.");
+    //   } catch (error: any) {
+    //     spinner.fail("Failed to generate Docker files.");
+    //     logger.error(`Error: ${error.message}`);
+    //     process.exit(1);
+    //   }
+    // }
 
     const pluginsDependencies = answers.plugins.reduce(
       (acc: Record<string, string>, plugin: string) => {
@@ -354,7 +364,13 @@ export const generateCommand = new Command()
 
     spinner = ora("Generating Fastify project...").start();
     try {
-      await generateApp(answers.projectName, finalAppTemplate, {}, spinner);
+      await generateApp(
+        answers.projectName,
+        finalAppTemplate,
+        {},
+        answers.plugins,
+        spinner
+      );
       spinner.succeed(
         `Project "${answers.projectName}" created and dependencies installed successfully!`
       );

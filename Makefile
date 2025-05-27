@@ -1,7 +1,7 @@
 build:
-	rm -rf ./dist && rm -rf api/ && pnpm run build
+	pnpm run build
 
 generate:
-	node ./dist/cli.js generate
+	rm -rf api/ && node ./dist/cli.js generate
 
 build-generate: build generate

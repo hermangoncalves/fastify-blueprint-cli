@@ -7,7 +7,10 @@
   "description": "A CLI to generate Fastify projects with TypeScript",
   "main": "index.js",
   "scripts": {
-    "build": "tsc && cp -r templates dist/templates",
+    "build:clean": "rm -rf dist",
+    "build:tsc": "tsc",
+    "build:templates": "cp -r templates dist/",
+    "build": "pnpm build:clean && pnpm build:tsc && pnpm build:templates",
     "start": "node dist/index.js",
     "dev": "tsc --watch",
     "lint": "eslint src --ext .ts",

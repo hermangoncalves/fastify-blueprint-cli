@@ -1,7 +1,9 @@
+import fastifyPlugin from "fastify-plugin";
+import fastifyJwt from "@fastify/jwt";
 import { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 
-export default async function (fastify: FastifyInstance, opts: any) {
-  fastify.register(import("@fastify/jwt"), {
+const plugin = async (fastify: FastifyInstance, opts: any) => {
+  fastify.register(fastifyJwt, {
     secret: process.env.JWT_SECRET,
   });
 
@@ -15,4 +17,6 @@ export default async function (fastify: FastifyInstance, opts: any) {
       }
     }
   );
-}
+};
+
+export default fastifyPlugin(plugin);

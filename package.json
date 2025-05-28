@@ -1,11 +1,17 @@
 {
   "name": "fastify-blueprint-cli",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "bin": {
-    "fastify-blueprint-cli": "./dist/cli.js"
+    "fastify-blueprint-cli": "./dist/index.js"
   },
   "description": "A CLI to generate Fastify projects with TypeScript",
   "main": "index.js",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hermangoncalves/fastify-blueprint-cli"
+  },
+  "author": "Herman Gonçalves <hermangoncalves@outlook.com>",
+  "license": "MIT",
   "scripts": {
     "build:clean": "rm -rf dist",
     "build:tsc": "tsc",
@@ -25,8 +31,6 @@
     "cli",
     "blueprint"
   ],
-  "author": "Herman Gonçalves",
-  "license": "ISC",
   "packageManager": "pnpm@10.8.0",
   "devDependencies": {
     "@types/fs-extra": "^11.0.4",

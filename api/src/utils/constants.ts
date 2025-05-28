@@ -1,1 +1,0 @@
-export const PG_ERR_UNIQUE_VIOLATION = "23505";

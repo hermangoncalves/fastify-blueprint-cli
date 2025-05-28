@@ -1,10 +1,11 @@
 import { program } from "commander";
 import { generateCommand } from "./generate";
+import packageJson from "./package.json";
 
 program
-  .name("fastify-blueprint-cli")
-  .description("CLI to generate Fastify projects with TypeScript")
-  .version("1.0.0");
+  .name(packageJson.name)
+  .description(packageJson.description)
+  .version(packageJson.version);
 
 program.addCommand(generateCommand);
 
